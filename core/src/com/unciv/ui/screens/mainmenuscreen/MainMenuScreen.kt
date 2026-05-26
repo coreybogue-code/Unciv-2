@@ -123,7 +123,7 @@ class MainMenuScreen: BaseScreen(), RecreateOnResize {
         SoundPlayer.initializeForMainMenu()
 
         val background = skinStrings.getUiBackground("MainMenuScreen/Background", tintColor = clearColor)
-        backgroundStack.add(BackgroundActor(background, Align.center))
+        backgroundStack.add(BackgroundActor(background, Align.left))
         stage.addActor(backgroundStack)
         backgroundStack.setFillParent(true)
 
@@ -145,8 +145,6 @@ class MainMenuScreen: BaseScreen(), RecreateOnResize {
         // This is an extreme safeguard - should an invalid settings.tileSet ever make it past the
         // guard in UncivGame.create, simply omit the background so the user can at least get to options
         // (let him crash when loading a game but avoid locking him out entirely)
-        if (game.settings.tileSet in TileSetCache)
-            startBackgroundMapGeneration()
 
         val column1 = Table().apply { defaults().pad(10f).fillX() }
         val column2 = if (singleColumn) column1 else Table().apply { defaults().pad(10f).fillX() }
@@ -253,57 +251,6 @@ class MainMenuScreen: BaseScreen(), RecreateOnResize {
         stage.addActor(versionTable)
     }
 
-    private fun startBackgroundMapGeneration() {
-        stopBackgroundMapGeneration()  // shouldn't be necessary as resize re-instantiates this class
-        backgroundMapGenerationJob = Concurrency.run("ShowMapBackground") {
-            // MapSize.Small has easily enough tiles to fill the entire background - unless the user sized their window to some extreme aspect ratio
-            val mapWidth = stage.width / TileGroupMap.groupHorizontalAdvance
-            val mapHeight = stage.height / TileGroupMap.groupSize
-            @Pure fun Float.scaleCoord(scale: Float) = ceil(this * scale).toInt().coerceAtLeast(6)
-            // These scale values are chosen so that a common 4:3 screen minus taskbar gives the same as MapSize.Small
-            val backgroundMapSize = MapSize(mapWidth.scaleCoord(.77f), mapHeight.scaleCoord(1f))
-
-            val newMap = MapGenerator(backgroundMapRuleset, this)
-                .generateMap(MapParameters().apply {
-                    shape = MapShape.rectangular
-                    mapSize = backgroundMapSize
-                    type = MapType.pangaea
-                    temperatureintensity = .7f
-                    waterThreshold = -0.1f // mainly land, gets about 30% water
-                    modifyForEasterEgg()
-                })
-
-            launchOnGLThread { // for GL context
-                ImageGetter.setNewRuleset(backgroundMapRuleset, ignoreIfModsAreEqual = true)
-                val mapHolder = EditorMapHolder(
-                    this@MainMenuScreen,
-                    newMap
-                ) {}
-                mapHolder.color = mapHolder.color.cpy()
-                mapHolder.color.a = 0f
-                backgroundStack.add(mapHolder)
-
-                if (backgroundMapExists) {
-                    mapHolder.addAction(Actions.sequence(
-                        Actions.fadeIn(mapFadeTime),
-                        Actions.run { backgroundStack.removeActorAt(1, false) }
-                    ))
-                } else {
-                    backgroundMapExists = true
-                    mapHolder.addAction(Actions.fadeIn(mapFirstFadeTime))
-                }
-            }
-        }.apply {
-            invokeOnCompletion {
-                backgroundMapGenerationJob = null
-                backgroundStack.addAction(Actions.sequence(
-                    Actions.delay(mapReplaceDelay),
-                    Actions.run { startBackgroundMapGeneration() }
-                ))
-            }
-        }
-    }
-
     private fun stopBackgroundMapGeneration() {
         backgroundStack.clearActions()
         val currentJob = backgroundMapGenerationJob
@@ -393,10 +340,6 @@ class MainMenuScreen: BaseScreen(), RecreateOnResize {
     override fun recreate(): BaseScreen {
         stopBackgroundMapGeneration()
         return MainMenuScreen()
-    }
-
-    override fun resume() {
-        startBackgroundMapGeneration()
     }
 
     // We contain a map...
